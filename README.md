@@ -2,30 +2,78 @@
 
 Middleware para integração IoT com ORBCOMM OGx Gateway Web Service (OGWS).
 
-Este serviço realiza polling automático de mensagens From-Mobile (RE) da API OGWS e expõe endpoints REST para consulta.
+Este serviço realiza coleta automática de mensagens From-Mobile (RE) da API OGWS, publica no Kafka e expõe endpoints REST para consulta e envio de mensagens.
 
 ## Requisitos
 
-- Node.js >= 18.0.0
+| Requisito | Versão |
+|-----------|--------|
+| Node.js | >= 18.0.0 (recomendado: 20.x) |
+| npm | >= 9.0.0 |
+| Kafka | >= 2.8.0 (opcional) |
+
+## Dependências
+
+| Pacote | Versão | Descrição |
+|--------|--------|-----------|
+| fastify | ^5.7.4 | Framework web |
+| @fastify/cors | ^9.0.1 | Plugin CORS |
+| kafkajs | ^2.2.4 | Cliente Kafka |
+| dotenv | ^17.2.4 | Variáveis de ambiente |
+| pino-pretty | ^10.3.0 | Logs formatados |
+| typescript | ^5.3.3 | Suporte TypeScript |
+| tsx | ^4.7.0 | Execução TypeScript |
 
 ## Instalação
 
 ```bash
+git clone <repo-url>
+cd iot-orbcomm-middleware
 npm install
 ```
 
 ## Configuração
 
-Configure as variáveis de ambiente (ou use os valores padrão de teste):
+Crie um arquivo `.env` na raiz do projeto:
 
-| Variável | Descrição | Padrão |
-|----------|-----------|--------|
-| `PORT` | Porta do servidor | `3000` |
-| `HOST` | Host do servidor | `0.0.0.0` |
-| `OGWS_BASE_URL` | URL base da API OGWS | `https://ogws.swlab.ca/api/v1.0` |
-| `OGWS_ACCESS_ID` | ID de acesso ORBCOMM | `70000934` |
-| `OGWS_PASSWORD` | Senha ORBCOMM | `password` |
-| `POLLING_INTERVAL_SECONDS` | Intervalo de polling | `60` |
+```bash
+cp .env.example .env
+```
+
+### Variáveis de Ambiente
+
+| Variável | Descrição | Obrigatório | Padrão |
+|----------|-----------|-------------|--------|
+| `PORT` | Porta do servidor | Não | `3000` |
+| `HOST` | Host do servidor | Não | `0.0.0.0` |
+| `OGWS_BASE_URL` | URL base da API OGWS | Sim | - |
+| `OGWS_ACCESS_ID` | ID de acesso ORBCOMM | Sim | - |
+| `OGWS_PASSWORD` | Senha ORBCOMM | Sim | - |
+| `POLLING_INTERVAL_SECONDS` | Intervalo de coleta (segundos) | Não | `60` |
+| `KAFKA` | Broker Kafka | Não | `localhost:9092` |
+| `KAFKA_TOPIC` | Tópico para mensagens | Não | `orbcomm-messages` |
+| `KAFKA_ENABLED` | Habilitar integração Kafka | Não | `true` |
+
+### Exemplo de `.env`
+
+```env
+# Servidor
+PORT=3000
+HOST=0.0.0.0
+
+# OGWS API
+OGWS_BASE_URL=https://ogws.orbcomm.com/api/v1.0
+OGWS_ACCESS_ID=seu_access_id
+OGWS_PASSWORD=sua_senha
+
+# Collector
+POLLING_INTERVAL_SECONDS=60
+
+# Kafka
+KAFKA=localhost:9092
+KAFKA_TOPIC=orbcomm-messages
+KAFKA_ENABLED=true
+```
 
 ## Uso
 
@@ -46,7 +94,7 @@ npm start
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
 | GET | `/` | Informações do serviço |
-| GET | `/api/status` | Status completo do serviço |
+| GET | `/api/status` | Status completo (collector, auth, kafka) |
 | GET | `/api/health` | Health check |
 
 ### Mensagens
@@ -55,14 +103,56 @@ npm start
 | GET | `/api/messages` | Lista todas as mensagens |
 | GET | `/api/messages/mobile/:mobileId` | Mensagens por MobileID |
 | GET | `/api/messages/sin/:sin` | Mensagens por SIN |
-| POST | `/api/messages/poll` | Força busca imediata |
+| POST | `/api/messages/collect` | Força coleta imediata |
+| POST | `/api/messages/send` | Envia mensagem para dispositivo |
 | DELETE | `/api/messages` | Limpa mensagens armazenadas |
 
-### Controle de Polling
+### Controle do Collector
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
-| POST | `/api/polling/start` | Inicia polling automático |
-| POST | `/api/polling/stop` | Para polling automático |
+| POST | `/api/collector/start` | Inicia coleta automática |
+| POST | `/api/collector/stop` | Para coleta automática |
+
+## Envio de Mensagens (To-Mobile)
+
+### Com Payload estruturado (SIN/MIN)
+```bash
+curl -X POST http://localhost:3000/api/messages/send \
+  -H "Content-Type: application/json" \
+  -d '{"destinationId":"02009745SKY0712","sin":16,"min":2}'
+```
+
+### Com RawPayload (bytes)
+```bash
+curl -X POST http://localhost:3000/api/messages/send \
+  -H "Content-Type: application/json" \
+  -d '{"destinationId":"02009745SKY0712","rawPayload":[128,1,84,69,83,84,69]}'
+```
+
+## Kafka
+
+### Consumir mensagens do tópico
+```bash
+kcat -b localhost:9092 -t orbcomm-messages -C -o beginning
+```
+
+### Formato das mensagens no Kafka
+```json
+{
+  "id": 21578348727,
+  "mobileId": "02009745SKY0712",
+  "sin": 152,
+  "messageUTC": "2026-02-12 13:26:02",
+  "receiveUTC": "2026-02-12 13:26:02",
+  "payload": null,
+  "rawPayload": "mAHTG6dHyUZP0Sm9AAA=",
+  "regionName": "AORWSC",
+  "otaMessageSize": 14,
+  "transport": 1,
+  "network": 1,
+  "timestamp": "2026-02-19T11:44:30.000Z"
+}
+```
 
 ## Estrutura do Projeto
 
@@ -70,15 +160,18 @@ npm start
 iot-orbcomm-middleware/
 ├── src/
 │   ├── config/
-│   │   └── env.ts              # Configurações
+│   │   └── env.ts                  # Configurações e validação
 │   ├── routes/
-│   │   └── messages.routes.ts  # Rotas da API
+│   │   └── messages.routes.ts      # Rotas da API
 │   ├── services/
-│   │   ├── ogws-auth.service.ts     # Autenticação OGWS
-│   │   └── ogws-messages.service.ts # Serviço de mensagens
+│   │   ├── ogws-auth.service.ts    # Autenticação OGWS
+│   │   ├── ogws-messages.service.ts # Coleta de mensagens
+│   │   └── kafka.service.ts        # Publicação no Kafka
 │   ├── types/
-│   │   └── ogws.types.ts       # Tipos TypeScript
-│   └── index.ts                # Entry point
+│   │   └── ogws.types.ts           # Tipos TypeScript
+│   └── index.ts                    # Entry point
+├── .env                            # Variáveis de ambiente (não commitado)
+├── .env.example                    # Exemplo de configuração
 ├── package.json
 ├── tsconfig.json
 └── README.md
@@ -89,16 +182,14 @@ iot-orbcomm-middleware/
 Este middleware utiliza a API OGx Gateway Web Service (OGWS) da ORBCOMM.
 
 - **Documentação**: [Partner Support](https://partner-support.orbcomm.com)
+- **Ambiente de Produção**: https://ogws.orbcomm.com/api/v1.0
 - **Ambiente de Teste**: https://ogws.swlab.ca/api/v1.0
-- **Swagger/Docs**: https://ogws.swlab.ca/docs/api/index.html
+- **Swagger/Docs**: https://ogws.orbcomm.com/docs/api/index.html
 
-### Credenciais de Teste
-- Access ID: `70000934` (SuperUser) ou `70000935` (User)
-- Password: `password`
-
-### MobileIDs de Teste
-- OGx: `00002000SKY9307`, `00002001SKY9317`
-- IsatData Pro: `01097623SKY2C68`, `01014034SKY9397`
+### Token de Autenticação
+- Tipo: Bearer Token
+- Validade: 7 dias
+- Renovação: Automática pelo middleware
 
 ## Licença
 
