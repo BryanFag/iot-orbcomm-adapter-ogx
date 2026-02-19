@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { ogwsMessagesService } from '../services/ogws-messages.service.js';
 import { ogwsAuthService } from '../services/ogws-auth.service.js';
+import { kafkaService } from '../services/kafka.service.js';
 import { config } from '../config/env.js';
 
 /**
@@ -228,6 +229,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     fastify.get('/status', async (_request: FastifyRequest, reply: FastifyReply) => {
         const collectorState = ogwsMessagesService.getCollectorState();
         const authStatus = ogwsAuthService.getAuthStatus();
+        const kafkaState = kafkaService.getState();
 
         return reply.send({
             success: true,
@@ -236,6 +238,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
             timestamp: new Date().toISOString(),
             collector: collectorState,
             authentication: authStatus,
+            kafka: kafkaState,
         });
     });
 

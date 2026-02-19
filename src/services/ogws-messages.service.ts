@@ -1,5 +1,6 @@
 import { config } from '../config/env.js';
 import { ogwsAuthService } from './ogws-auth.service.js';
+import { kafkaService } from './kafka.service.js';
 import type {
     GetReturnMessagesResponse,
     ReturnMessage,
@@ -101,6 +102,9 @@ class OGWSMessagesService {
 
                 console.log('═══════════════════════════════════════════════════════');
                 console.log('');
+
+                // Publica mensagens no Kafka
+                await kafkaService.publishMessages(newMessages);
 
                 this.messages.push(...newMessages);
             } else {

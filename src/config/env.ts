@@ -26,6 +26,13 @@ export const config: EnvConfig = {
      * Polling Time
      */
     POLLING_INTERVAL_SECONDS: parseInt(process.env.POLLING_INTERVAL_SECONDS || '60', 10),
+
+    /**
+     * Kafka
+     */
+    KAFKA_BROKER: process.env.KAFKA || 'localhost:9092',
+    KAFKA_TOPIC: process.env.KAFKA_TOPIC || 'orbcomm-messages',
+    KAFKA_ENABLED: process.env.KAFKA_ENABLED !== 'false',
 };
 
 

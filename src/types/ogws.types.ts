@@ -94,6 +94,9 @@ export interface EnvConfig {
     OGWS_ACCESS_ID: string;
     OGWS_PASSWORD: string;
     POLLING_INTERVAL_SECONDS: number;
+    KAFKA_BROKER: string;
+    KAFKA_TOPIC: string;
+    KAFKA_ENABLED: boolean;
 }
 
 export interface CollectorState {

@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import { config, validateEnv } from './config/env.js';
 import { messagesRoutes, serviceRoutes } from './routes/messages.routes.js';
 import { ogwsMessagesService } from './services/ogws-messages.service.js';
+import { kafkaService } from './services/kafka.service.js';
 
 const APP_NAME = 'IOT-ORBCOMM-MIDDLEWARE';
 const VERSION = '1.0.0';
@@ -73,6 +74,7 @@ async function bootstrap() {
   const shutdown = async (signal: string) => {
     console.log(`\n[SHUTDOWN] Recebido ${signal}. Encerrando...`);
     ogwsMessagesService.stopCollector();
+    await kafkaService.disconnect();
     await fastify.close();
     process.exit(0);
   };
@@ -95,11 +97,17 @@ async function bootstrap() {
     Servidor: http://${config.HOST}:${config.PORT}          
     OGWS API: ${config.OGWS_BASE_URL}                       
     Access ID: ${config.OGWS_ACCESS_ID}                     
+    Kafka: ${config.KAFKA_ENABLED ? config.KAFKA_BROKER : 'desabilitado'}
+    Kafka Topic: ${config.KAFKA_ENABLED ? config.KAFKA_TOPIC : '-'}
                                                            
 ═══════════════════════════════════════════════════════════
 `);
 
-    ogwsMessagesService.startCollector(); //Inicia o collector de mensagens
+    // Conecta ao Kafka
+    await kafkaService.connect();
+
+    // Inicia o collector de mensagens
+    ogwsMessagesService.startCollector();
 
   } catch (error) {
     fastify.log.error(error);
