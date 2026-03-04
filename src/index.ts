@@ -1,11 +1,11 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { config, validateEnv } from './config/env.js';
-import { messagesRoutes, serviceRoutes } from './routes/messages.routes.js';
-import { ogwsMessagesService } from './services/ogws-messages.service.js';
-import { kafkaService } from './services/kafka.service.js';
+import { serviceRoutes } from './routes/messages.routes.js';
+import { kafkaConsumerService } from './services/kafka-consumer.service.js';
+import { kafkaProducerService } from './services/kafka.service.js';
 
-const APP_NAME = 'IOT-ORBCOMM-MIDDLEWARE';
+const APP_NAME = 'IOT-ISADATAPRO-OGX-MIDDLEWARE';
 const VERSION = '1.0.0';
 
 /**
@@ -39,7 +39,6 @@ async function bootstrap() {
   /**
    * Registra rotas
    */
-  await fastify.register(messagesRoutes, { prefix: '/api' });
   await fastify.register(serviceRoutes, { prefix: '/api' });
 
 
@@ -50,19 +49,10 @@ async function bootstrap() {
     return {
       name: APP_NAME,
       version: VERSION,
-      description: 'Middleware para integração IoT com ORBCOMM OGWS',
-      documentation: 'https://partner-support.orbcomm.com',
+      description: 'Middleware de tradução OGx <-> IDP',
       endpoints: {
         status: 'GET /api/status',
         health: 'GET /api/health',
-        messages: 'GET /api/messages',
-        messagesByMobile: 'GET /api/messages/mobile/:mobileId',
-        messagesBySIN: 'GET /api/messages/sin/:sin',
-        collectNow: 'POST /api/messages/collect',
-        sendMessage: 'POST /api/messages/send',
-        clearMessages: 'DELETE /api/messages',
-        startCollector: 'POST /api/collector/start',
-        stopCollector: 'POST /api/collector/stop',
       },
     };
   });
@@ -73,8 +63,8 @@ async function bootstrap() {
    */
   const shutdown = async (signal: string) => {
     console.log(`\n[SHUTDOWN] Recebido ${signal}. Encerrando...`);
-    ogwsMessagesService.stopCollector();
-    await kafkaService.disconnect();
+    await kafkaConsumerService.disconnect();
+    await kafkaProducerService.disconnect();
     await fastify.close();
     process.exit(0);
   };
@@ -95,19 +85,21 @@ async function bootstrap() {
         ${APP_NAME} v${VERSION}                              
                                                            
     Servidor: http://${config.HOST}:${config.PORT}          
-    OGWS API: ${config.OGWS_BASE_URL}                       
-    Access ID: ${config.OGWS_ACCESS_ID}                     
     Kafka: ${config.KAFKA_ENABLED ? config.KAFKA_BROKER : 'desabilitado'}
-    Kafka Topic: ${config.KAFKA_ENABLED ? config.KAFKA_TOPIC : '-'}
+    Consumer Topics:
+      - ${config.KAFKA_TOPIC_RECEIVED}
+      - ${config.KAFKA_TOPIC_TRANSLATE}
+    Producer Topic: ${config.KAFKA_TOPIC_SEND}
+    Forward API: ${config.FORWARD_API_ENABLED ? config.FORWARD_API_URL : 'desabilitada'}
                                                            
 ═══════════════════════════════════════════════════════════
 `);
 
-    // Conecta ao Kafka
-    await kafkaService.connect();
+    // Conecta Kafka Producer (para publicar no send.message.ogx)
+    await kafkaProducerService.connect();
 
-    // Inicia o collector de mensagens
-    ogwsMessagesService.startCollector();
+    // Conecta Kafka Consumers (received.message.ogx + translate.message.ogx)
+    await kafkaConsumerService.connect();
 
   } catch (error) {
     fastify.log.error(error);

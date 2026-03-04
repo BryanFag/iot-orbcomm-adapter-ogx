@@ -1,11 +1,12 @@
 import { Kafka, Producer, logLevel } from 'kafkajs';
 import { config } from '../config/env.js';
-import type { ReturnMessage } from '../types/ogws.types.js';
+import type { SendMessageOGx } from '../types/ogws.types.js';
 
 /**
- * Serviço para publicação de mensagens no Kafka
+ * Serviço Kafka Producer
+ * Publica mensagens convertidas (IDP→OGx) no tópico send.message.ogx
  */
-class KafkaService {
+class KafkaProducerService {
     private kafka: Kafka | null = null;
     private producer: Producer | null = null;
     private isConnected = false;
@@ -13,24 +14,24 @@ class KafkaService {
     private errors = 0;
 
     /**
-     * Inicializa a conexão com o Kafka
+     * Inicializa a conexão com o Kafka (Producer)
      */
     async connect(): Promise<void> {
         if (!config.KAFKA_ENABLED) {
-            console.log('[KAFKA] Kafka desabilitado via configuracao');
+            console.log('[KAFKA-PRODUCER] Kafka producer desabilitado via configuracao');
             return;
         }
 
         console.log('');
         console.log('═══════════════════════════════════════════════════════');
-        console.log('[KAFKA] CONECTANDO AO KAFKA');
+        console.log('[KAFKA-PRODUCER] CONECTANDO AO KAFKA');
         console.log('═══════════════════════════════════════════════════════');
         console.log(`Broker: ${config.KAFKA_BROKER}`);
-        console.log(`Topic: ${config.KAFKA_TOPIC}`);
+        console.log(`Topic: ${config.KAFKA_TOPIC_SEND}`);
 
         try {
             this.kafka = new Kafka({
-                clientId: 'iot-orbcomm-middleware',
+                clientId: 'iot-isadatapro-ogx-middleware',
                 brokers: [config.KAFKA_BROKER],
                 logLevel: logLevel.WARN,
                 retry: {
@@ -43,13 +44,12 @@ class KafkaService {
             await this.producer.connect();
             this.isConnected = true;
 
-            console.log('[SUCCESS] Conectado ao Kafka');
+            console.log('[SUCCESS] Producer conectado ao Kafka');
             console.log('═══════════════════════════════════════════════════════');
             console.log('');
         } catch (error) {
             this.errors++;
-            console.log('[ERROR] Erro ao conectar ao Kafka:', error);
-            console.log('[WARN] Mensagens serao apenas logadas, nao publicadas');
+            console.log('[ERROR] Erro ao conectar producer ao Kafka:', error);
             console.log('═══════════════════════════════════════════════════════');
             console.log('');
         }
@@ -62,111 +62,51 @@ class KafkaService {
         if (this.producer && this.isConnected) {
             await this.producer.disconnect();
             this.isConnected = false;
-            console.log('[KAFKA] Desconectado do Kafka');
+            console.log('[KAFKA-PRODUCER] Desconectado do Kafka');
         }
     }
 
     /**
-     * Publica uma mensagem no tópico Kafka
+     * Publica uma mensagem convertida (formato OGx) no tópico send.message.ogx
      */
-    async publishMessage(message: ReturnMessage): Promise<void> {
+    async publishSendMessage(message: SendMessageOGx): Promise<void> {
         if (!config.KAFKA_ENABLED || !this.isConnected || !this.producer) {
+            console.warn('[KAFKA-PRODUCER] Producer nao conectado, mensagem nao publicada');
             return;
         }
 
         try {
             const kafkaMessage = {
-                key: message.MobileID,
-                value: JSON.stringify({
-                    id: message.ID,
-                    mobileId: message.MobileID,
-                    sin: message.SIN,
-                    messageUTC: message.MessageUTC,
-                    receiveUTC: message.ReceiveUTC,
-                    payload: message.Payload || null,
-                    rawPayload: message.RawPayload || null,
-                    regionName: message.RegionName || null,
-                    otaMessageSize: message.OTAMessageSize,
-                    transport: message.Transport,
-                    network: message.Network,
-                    timestamp: new Date().toISOString(),
-                }),
+                key: message.DestinationID,
+                value: JSON.stringify(message),
                 timestamp: Date.now().toString(),
             };
 
             await this.producer.send({
-                topic: config.KAFKA_TOPIC,
+                topic: config.KAFKA_TOPIC_SEND,
                 messages: [kafkaMessage],
             });
 
             this.messagesSent++;
-            console.log(`[KAFKA] Mensagem ${message.ID} publicada no topic ${config.KAFKA_TOPIC}`);
+            console.log(`[KAFKA-PRODUCER] Mensagem para ${message.DestinationID} publicada no topic ${config.KAFKA_TOPIC_SEND}`);
         } catch (error) {
             this.errors++;
-            console.error(`[KAFKA] Erro ao publicar mensagem ${message.ID}:`, error);
+            console.error(`[KAFKA-PRODUCER] Erro ao publicar mensagem:`, error);
         }
     }
 
     /**
-     * Publica múltiplas mensagens no Kafka
+     * Retorna o estado atual do serviço Kafka Producer
      */
-    async publishMessages(messages: ReturnMessage[]): Promise<void> {
-        if (!config.KAFKA_ENABLED || !this.isConnected || !this.producer || messages.length === 0) {
-            return;
-        }
-
-        console.log(`[KAFKA] Publicando ${messages.length} mensagem(ns) no Kafka...`);
-
-        try {
-            const kafkaMessages = messages.map(msg => ({
-                key: msg.MobileID,
-                value: JSON.stringify({
-                    id: msg.ID,
-                    mobileId: msg.MobileID,
-                    sin: msg.SIN,
-                    messageUTC: msg.MessageUTC,
-                    receiveUTC: msg.ReceiveUTC,
-                    payload: msg.Payload || null,
-                    rawPayload: msg.RawPayload || null,
-                    regionName: msg.RegionName || null,
-                    otaMessageSize: msg.OTAMessageSize,
-                    transport: msg.Transport,
-                    network: msg.Network,
-                    timestamp: new Date().toISOString(),
-                }),
-                timestamp: Date.now().toString(),
-            }));
-
-            await this.producer.send({
-                topic: config.KAFKA_TOPIC,
-                messages: kafkaMessages,
-            });
-
-            this.messagesSent += messages.length;
-            console.log(`[KAFKA] ${messages.length} mensagem(ns) publicada(s) com sucesso`);
-        } catch (error) {
-            this.errors++;
-            console.error('[KAFKA] Erro ao publicar mensagens em lote:', error);
-            
-            // Tenta publicar individualmente
-            for (const msg of messages) {
-                await this.publishMessage(msg);
-            }
-        }
-    }
-
-    /**
-     * Retorna o estado atual do serviço Kafka
-     */
-    getState(): { enabled: boolean; connected: boolean; messagesSent: number; errors: number } {
+    getState(): { enabled: boolean; connected: boolean; topic: string; messagesSent: number; errors: number } {
         return {
             enabled: config.KAFKA_ENABLED,
             connected: this.isConnected,
+            topic: config.KAFKA_TOPIC_SEND,
             messagesSent: this.messagesSent,
             errors: this.errors,
         };
     }
 }
 
-export const kafkaService = new KafkaService();
-
+export const kafkaProducerService = new KafkaProducerService();
